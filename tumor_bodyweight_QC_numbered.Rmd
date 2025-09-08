@@ -1,0 +1,528 @@
+---
+title: "Tumor & Bodyweight Analysis with QC and Filtering"
+author: "Auto-generated Rmd"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+params:
+  tumor_file: ~/export_catrin/11636_tumor_mouse_and_group_means.xlsx
+  bw_file: ~/export_catrin/11636_bodyweight_mouse_and_group_means.xlsx
+  outdir: ~/export_catrin/11636
+  bin_width: 3
+  bin_anchor: 1
+  bin_label: start
+  min_n_bodyweight: 5
+---
+
+# Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = FALSE)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Packages
+required_pkgs <- c("readxl", "dplyr", "ggplot2", "forcats", "knitr")
+to_install <- setdiff(required_pkgs, rownames(installed.packages()))
+if (length(to_install)) install.packages(to_install, dependencies = TRUE, repos = "https://cloud.r-project.org")
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(forcats)
+library(knitr)
+
+# Params
+tumor_file <- path.expand(params$tumor_file)
+bw_file    <- path.expand(params$bw_file)
+outdir     <- params$outdir
+
+bin_width  <- as.integer(params$bin_width)
+bin_anchor <- as.integer(params$bin_anchor)
+bin_label  <- as.character(params$bin_label)
+if (!bin_label %in% c("start","center")) bin_label <- "start"
+minN_bw    <- as.integer(params$min_n_bodyweight)
+
+if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
+stopifnot(file.exists(tumor_file), file.exists(bw_file))
+```
+
+# Tumor analysis
+
+## Shared mapping & helpers
+```{r mapping}
+group_name_map <- c(
+  `11636.1` = "Control",
+  `11636.2` = "Tamoxifen",
+  `11636.3` = "Dexamethasone",
+  `11636.4` = "Tamoxifen + Dexamethasone"
+)
+
+pal <- c(
+  "Control"                   = "#1f77b4",
+  "Tamoxifen"                 = "#ff7f0e",
+  "Dexamethasone"             = "#2ca02c",
+  "Tamoxifen + Dexamethasone" = "#d62728"
+)
+
+bin_day_keep0 <- function(day, width = 3L, anchor = 1L, label = c("start","center")) {
+  label <- match.arg(label)
+  base <- anchor + width * floor((day - anchor)/width)
+  base <- ifelse(day <= 0, 0L, base)
+  if (label == "center") {
+    base <- ifelse(day <= 0, 0L, base + floor((width - 1L)/2L))
+  }
+  as.integer(base)
+}
+```
+
+## Tumor: data loading
+```{r tumor-load}
+mouse_df <- readxl::read_excel(tumor_file, sheet = "Mouse_day_mean") %>%
+  dplyr::mutate(
+    group_code = as.character(group_code),
+    group_name = factor(unname(group_name_map[group_code]), levels = names(pal)),
+    day        = as.numeric(day),
+    mouse_id   = as.character(mouse_id),
+    volume_mm3 = as.numeric(mean_volume_mm3)
+  ) %>%
+  dplyr::filter(group_code %in% names(group_name_map)) %>%
+  dplyr::arrange(group_name, mouse_id, day)
+
+knitr::kable(head(mouse_df, 8), caption="Preview: tumor per mouse per day")
+
+```
+
+## Tumor: data quality check
+```{r tumor-quality}
+min_points_required  <- 4
+
+tum_qc <- mouse_df %>%
+  group_by(group_code, group_name, mouse_id) %>%
+  arrange(day, .by_group = TRUE) %>%
+  summarise(
+    n_points   = n(),
+    min_day    = min(day, na.rm = TRUE),
+    max_day    = max(day, na.rm = TRUE),
+    first_vol  = first(volume_mm3),
+    last_vol   = last(volume_mm3),
+    min_vol    = min(volume_mm3, na.rm = TRUE),
+    max_vol    = max(volume_mm3, na.rm = TRUE),
+    .groups    = "drop"
+  ) %>%
+  mutate(
+    recommend_exclude = (n_points < min_points_required) | (min_vol <= 0)
+  ) %>%
+  arrange(group_code, mouse_id)
+
+knitr::kable(
+  tum_qc,
+  caption = "Simplified tumor QC table per mouse"
+)
+```
+
+
+
+## Tumor growth per mouse
+```{r tumor-individuals, fig.width=12, fig.height=5}
+# Plot function for each treatment group separately
+plot_group_mice <- function(df_group, title_text) {
+  ggplot(df_group, aes(x = day, y = volume_mm3, group = mouse_id, color = mouse_id)) +
+    geom_line(linewidth = 1, alpha = 0.9) +
+    geom_point(size = 2, alpha = 0.9) +
+    scale_color_discrete(guide = "none") +
+    labs(
+      title = title_text,
+      x = "Time (days)",
+      y = "Tumor volume (mm³)"
+    ) +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
+      panel.grid.minor.y = element_blank()
+    )
+}
+
+# Loop over groups and print separate plots
+for (g in levels(mouse_df$group_name)) {
+  sub <- dplyr::filter(mouse_df, group_name == g)
+  n_m <- dplyr::n_distinct(sub$mouse_id)
+  ttl <- paste0(g, " — individual tumor growth (n = ", n_m, ")")
+  print(plot_group_mice(sub, ttl))
+}
+```
+
+## Exclude mice with < 30 days
+```{r tumor-filter}
+min_duration_days <- 30
+
+duration_summary <- mouse_df %>%
+  group_by(group_code, group_name, mouse_id) %>%
+  summarise(
+    min_day = min(day, na.rm = TRUE),
+    max_day = max(day, na.rm = TRUE),
+    duration_days = max_day - min_day,
+    .groups = "drop"
+  )
+
+exclude_ids <- duration_summary %>%
+  filter(duration_days < min_duration_days) %>%
+  pull(mouse_id)
+
+mouse_df_filtered <- mouse_df %>%
+  filter(!mouse_id %in% exclude_ids)
+
+knitr::kable(
+  duration_summary %>%
+    mutate(excluded = duration_days < min_duration_days),
+  caption = paste("Mice with duration <", min_duration_days, "days are excluded")
+)
+```
+
+## Tumor group mean ± SD (Per day, no binning, filtered mice)
+```{r tumor-mean-unbinned, fig.width=12, fig.height=5}
+tumor_daily <- mouse_df_filtered %>%
+  group_by(group_code, group_name, day) %>%
+  summarise(
+    mean_volume_mm3 = mean(volume_mm3, na.rm = TRUE),
+    sd_mm3          = sd(volume_mm3, na.rm = TRUE),
+    n_mice          = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(group_name, day)
+
+ggplot(tumor_daily, aes(x = day, y = mean_volume_mm3,
+                        color = group_name, group = group_name)) +
+  geom_errorbar(aes(ymin = mean_volume_mm3 - sd_mm3,
+                    ymax = mean_volume_mm3 + sd_mm3),
+                width = 0.3, alpha = 0.9) +
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 2.6, shape = 16) +
+  scale_color_manual(values = pal, breaks = names(pal), name = "Treatment") +
+  labs(
+    title = "Tumor growth by treatment group (mean ± SD, per day, filtered mice)",
+    x = "Day",
+    y = "Tumor volume (mm³)"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "top",
+    legend.title    = element_text(size = 11),
+    legend.text     = element_text(size = 10),
+    plot.title      = element_text(face = "bold"),
+    panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
+    panel.grid.minor.y = element_blank()
+  )
+```
+
+## Tumor group mean ± SD (Binned, filtered mice)
+```{r tumor-mean-binned, fig.width=12, fig.height=5}
+# Custom binning function:
+# - keep day 0 separate
+# - bin 1–2 as 1, 3–5 as 3, etc.
+bin_day_custom <- function(day, width = 3L, anchor = 1L, label = "start") {
+  if (day == 0) return(0L)
+  label <- match.arg(label, choices = c("start", "center"))
+  base <- anchor + width * floor((day - anchor)/width)
+  if (label == "center") base <- base + floor((width - 1L)/2L)
+  as.integer(base)
+}
+
+tumor_binned <- mouse_df_filtered %>%
+  mutate(bin_day = vapply(day, bin_day_custom,
+                          integer(1), width = bin_width,
+                          anchor = bin_anchor,
+                          label = bin_label)) %>%
+  group_by(group_code, group_name, bin_day) %>%
+  summarise(
+    mean_volume_mm3 = mean(volume_mm3, na.rm = TRUE),
+    sd_mm3          = sd(volume_mm3, na.rm = TRUE),
+    n_mice          = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(group_name, bin_day)
+
+ggplot(tumor_binned, aes(x = bin_day, y = mean_volume_mm3,
+                         color = group_name, group = group_name)) +
+  geom_errorbar(aes(ymin = mean_volume_mm3 - sd_mm3,
+                    ymax = mean_volume_mm3 + sd_mm3),
+                width = 0.3, alpha = 0.9) +
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 2.6, shape = 16) +
+  scale_color_manual(values = pal, breaks = names(pal), name = "Treatment") +
+  labs(
+    title = paste0("Tumor growth by treatment group (mean ± SD, ",
+                   bin_width, "-day bins, day 0 kept separate)"),
+    x = "Day (with bins)",
+    y = "Tumor volume (mm³)"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "top",
+    legend.title    = element_text(size = 11),
+    legend.text     = element_text(size = 10),
+    plot.title      = element_text(face = "bold"),
+    panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+
+
+
+# Bodyweight analysis
+
+## Bodyweight per mouse
+# Bodyweight analysis (unfiltered mice)
+
+## Load bodyweight data
+```{r bw-load}
+bw_raw <- readxl::read_excel(bw_file, sheet = "Mouse_day_mean")
+
+# Detect correct bodyweight column
+bw_candidates <- c("mean_bodyweight_g", "bodyweight_g")
+bw_col <- bw_candidates[bw_candidates %in% names(bw_raw)][1]
+if (is.na(bw_col)) stop("No bodyweight column found in Mouse_day_mean")
+
+bw_mouse <- bw_raw %>%
+  mutate(
+    group_code   = as.character(group_code),
+    group_name   = factor(unname(group_name_map[group_code]), levels = names(pal)),
+    day          = as.numeric(day),
+    mouse_id     = as.character(mouse_id),
+    bodyweight_g = .data[[bw_col]]
+  ) %>%
+  filter(group_code %in% names(group_name_map)) %>%
+  arrange(group_name, mouse_id, day)
+
+knitr::kable(head(bw_mouse, 8), caption="Preview: bodyweight per mouse per day")
+```
+
+## Bodyweight per mouse
+```{r bw-plot}
+plot_bw_group <- function(df_group, title_text) {
+  ggplot(df_group, aes(x = day, y = bodyweight_g,
+                       group = mouse_id, color = mouse_id)) +
+    geom_line(linewidth = 1, alpha = 0.9) +
+    geom_point(size = 2, alpha = 0.9) +
+    scale_color_discrete(guide = "none") +
+    labs(
+      title = title_text,
+      x = "Time (days)",
+      y = "Bodyweight (g)"
+    ) +
+    theme_classic(base_size = 12) +
+    theme(
+      plot.title = element_text(face = "bold"),
+      panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
+      panel.grid.minor.y = element_blank()
+    )
+}
+
+for (g in levels(bw_mouse$group_name)) {
+  sub <- filter(bw_mouse, group_name == g)
+  n_m <- n_distinct(sub$mouse_id)
+  ttl <- paste0(g, " — individual bodyweights (n = ", n_m, ")")
+  print(plot_bw_group(sub, ttl))
+}
+```
+
+## Bodyweight group mean ± SD (per day, unfiltered)
+
+```{r,bw-SD}
+
+bw_daily <- bw_mouse %>%
+  group_by(group_name, day) %>%
+  summarise(
+    mean_bw = mean(bodyweight_g, na.rm = TRUE),
+    sd_bw   = sd(bodyweight_g, na.rm = TRUE),
+    n       = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(group_name, day)
+
+ggplot(bw_daily, aes(x = day, y = mean_bw,
+                     color = group_name, group = group_name)) +
+  geom_errorbar(aes(ymin = mean_bw - sd_bw, ymax = mean_bw + sd_bw),
+                width = 0.3, alpha = 0.9) +
+  geom_line(linewidth = 1.0) +
+  geom_point(size = 2.6, shape = 16) +
+  scale_color_manual(values = pal, breaks = names(pal), name = "Treatment") +
+  labs(
+    title = "Bodyweight by treatment group (mean ± SD, per day, unfiltered)",
+    x = "Day",
+    y = "Bodyweight (g)"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "top",
+    legend.title    = element_text(size = 11),
+    legend.text     = element_text(size = 10),
+    plot.title      = element_text(face = "bold"),
+    panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+
+
+## Bodyweight waterfall: maximale % verlies per muis
+```{r bw-waterfall, fig.width=12, fig.height=5}
+# Bereken baseline per muis (dag 0 indien aanwezig, anders eerste meting)
+baseline_df <- bw_mouse %>%
+  group_by(group_code, mouse_id) %>%
+  summarise(baseline_g = {
+    d <- arrange(cur_data_all(), day)
+    if (any(d$day == 0, na.rm = TRUE)) {
+      d$bodyweight_g[d$day == 0][1]
+    } else {
+      d$bodyweight_g[1]
+    }
+  }, .groups = "drop")
+
+# % verandering tov baseline
+bw_mouse_pct <- bw_mouse %>%
+  left_join(baseline_df, by = c("group_code", "mouse_id")) %>%
+  mutate(pct_change = 100 * (bodyweight_g - baseline_g) / baseline_g)
+
+# Nadir per muis (laagste % verandering)
+nadir <- bw_mouse_pct %>%
+  group_by(group_code, group_name, mouse_id) %>%
+  summarise(min_pct = min(pct_change, na.rm = TRUE), .groups = "drop")
+
+# Orden muizen per groep (meest negatieve eerst)
+wf <- nadir %>%
+  group_by(group_name) %>%
+  arrange(min_pct, .by_group = TRUE) %>%
+  mutate(ix = row_number()) %>%
+  ungroup()
+
+# Voeg offsets toe zodat groepen netjes naast elkaar komen
+group_sizes <- wf %>%
+  count(group_name, name = "n")
+gap <- 2
+group_sizes <- group_sizes %>%
+  mutate(offset = lag(cumsum(n) + gap, default = 0))
+wf <- wf %>%
+  left_join(group_sizes, by = "group_name") %>%
+  mutate(x = ix + offset)
+
+# Posities voor labels op de x-as
+centers <- group_sizes %>%
+  mutate(center = offset + n/2)
+
+# Plot
+ggplot(wf, aes(x = x, y = min_pct, fill = group_name)) +
+  geom_col(width = 0.9, alpha = 0.9) +
+  geom_hline(yintercept = -10, linetype = "dashed") +
+  scale_fill_manual(values = pal, breaks = names(pal), name = "Treatment") +
+  scale_x_continuous(breaks = centers$center, labels = centers$group_name) +
+  labs(
+    title = "Bodyweight waterfall: maximale % verlies per muis",
+    x = "Group",
+    y = "Maximaal % verlies t.o.v. baseline"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold"),
+    panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
+    panel.grid.minor.y = element_blank()
+  )
+
+```
+
+## Tumor: AUC per mouse + ANOVA/T-tests
+
+```{r tumor-auc, message=TRUE, warning=FALSE}
+library(pracma)   # voor trapz()
+library(ggpubr)   # voor stat_compare_means()
+
+# 1) Bereken AUC per muis (trapeziumregel, tot laatste dag van die muis)
+auc_per_mouse <- mouse_df_filtered %>%
+  group_by(group_code, group_name, mouse_id) %>%
+  arrange(day, .by_group = TRUE) %>%
+  summarise(
+    last_day = max(day, na.rm = TRUE),
+    auc      = trapz(day, volume_mm3),
+    .groups  = "drop"
+  )
+
+# Preview van de tabel
+knitr::kable(head(auc_per_mouse, 8), caption = "Preview: AUC per mouse")
+
+# 2) ANOVA over alle groepen
+anova_model <- aov(auc ~ group_name, data = auc_per_mouse)
+anova_res <- summary(anova_model)
+
+# 3) Pairwise t-tests met Holm correctie
+pairwise_res <- pairwise.t.test(
+  auc_per_mouse$auc,
+  auc_per_mouse$group_name,
+  p.adjust.method = "holm"
+)
+
+# 4) Tukey HSD post-hoc
+tukey_res <- TukeyHSD(anova_model)
+tukey_table <- as.data.frame(tukey_res$group_name)
+
+knitr::kable(
+  tukey_table,
+  digits = 4,
+  caption = "Tukey post-hoc test for pairwise group comparisons (AUC)"
+)
+
+# 5) Boxplot voor AUC per groep, met p-waardes
+ggplot(auc_per_mouse, aes(x = group_name, y = auc, fill = group_name)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(width = 0.2, alpha = 0.7, size = 2) +
+  scale_fill_manual(values = pal, guide = "none") +
+  labs(
+    title = "Tumor burden (AUC) per treatment group",
+    x = "Treatment group",
+    y = "AUC (mm³ × days)"
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    axis.text.x = element_text(angle = 20, hjust = 1),
+    plot.title  = element_text(face = "bold")
+  ) +
+  stat_compare_means(
+    method = "anova",
+    label.y = max(auc_per_mouse$auc) * 1.1
+  ) +
+  stat_compare_means(
+    method = "t.test",
+    comparisons = list(c("Tamoxifen", "Tamoxifen + Dexamethasone")),
+    label = "p.signif",
+    label.y = max(auc_per_mouse$auc) * 1.05
+  )
+
+# 6) Samenvattende tabel per groep (mean ± SD)
+auc_summary <- auc_per_mouse %>%
+  group_by(group_name) %>%
+  summarise(
+    n     = n(),
+    mean  = mean(auc, na.rm = TRUE),
+    sd    = sd(auc, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(mean_sd = paste0(round(mean, 1), " ± ", round(sd, 1)))
+
+knitr::kable(
+  auc_summary,
+  digits = 1,
+  caption = "Summary of AUC per treatment group (mean ± SD, n mice)"
+)
+
+# 7) Print resultaten in de console
+anova_res
+pairwise_res
+
+```
