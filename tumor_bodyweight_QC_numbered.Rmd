@@ -3,14 +3,10 @@ title: "11636_Data analysis"
 author: "Filip Noijons"
 date: "`r format(Sys.Date())`"
 output:
-  html_document:
-    toc: true
-    toc_float: true
-    number_sections: true
-    self_contained: false
-
   github_document:
     toc: true
+    
+    
 
 params:
   tumor_file: ~/export_catrin/11636_tumor_mouse_and_group_means.xlsx
