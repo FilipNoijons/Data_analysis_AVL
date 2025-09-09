@@ -2,10 +2,10 @@
 title: "11636_Data analysis"
 author: "Filip Noijons"
 date: "`r format(Sys.Date())`"
-output:
+output: 
   github_document:
     toc: true
-  
+    toc_depth: 3
    
     
 
