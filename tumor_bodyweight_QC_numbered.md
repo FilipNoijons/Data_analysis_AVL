@@ -10,28 +10,34 @@ Filip Noijons
   - [Tumor: data quality check](#tumor-data-quality-check)
   - [Tumor growth per mouse](#tumor-growth-per-mouse)
   - [Exclude mice with \< 30 days](#exclude-mice-with--30-days)
-  - [Tumor group mean ± SD (Per day, no binning, filtered
-    mice)](#tumor-group-mean--sd-per-day-no-binning-filtered-mice)
+  - [Tumor group mean ± SD](#tumor-group-mean--sd)
   - [Tumor group mean ± SD (Binned, filtered
     mice)](#tumor-group-mean--sd-binned-filtered-mice)
 - [Bodyweight analysis](#bodyweight-analysis)
-  - [Bodyweight per mouse](#bodyweight-per-mouse)
 - [Bodyweight analysis (unfiltered
   mice)](#bodyweight-analysis-unfiltered-mice)
   - [Load bodyweight data](#load-bodyweight-data)
-  - [Bodyweight per mouse](#bodyweight-per-mouse-1)
-  - [Bodyweight group mean ± SD (per day,
-    unfiltered)](#bodyweight-group-mean--sd-per-day-unfiltered)
-  - [Bodyweight waterfall: maximale % verlies per
-    muis](#bodyweight-waterfall-maximale--verlies-per-muis)
-  - [Tumor: AUC per mouse +
-    ANOVA/T-tests](#tumor-auc-per-mouse--anovat-tests)
+  - [Bodyweight per mouse](#bodyweight-per-mouse)
+  - [Bodyweight group mean ± SD](#bodyweight-group-mean--sd)
+  - [Bodyweight waterfall: maximum % loss per
+    mouse](#bodyweight-waterfall-maximum--loss-per-mouse)
+- [Tumor: AUC per mouse +
+  ANOVA/T-tests](#tumor-auc-per-mouse--anovat-tests)
 
 # Setup
 
 # Tumor analysis
 
 ## Shared mapping & helpers
+
+Group codes in the dataset (e.g. `11636.1`) are translated into clear
+treatment group names such as *Control* or *Tamoxifen*.  
+A fixed color palette is defined to ensure consistent colors across all
+plots.  
+A helper function (`bin_day_keep0`) is introduced to group days into
+time windows (binned data).  
+Binning reduces day-to-day noise while maintaining the overall growth
+trends.
 
 ``` r
 group_name_map <- c(
@@ -60,6 +66,17 @@ bin_day_keep0 <- function(day, width = 3L, anchor = 1L, label = c("start","cente
 ```
 
 ## Tumor: data loading
+
+Tumor measurements per mouse per day are imported from the Excel file.  
+The resulting dataset `mouse_df` contains:
+
+- `group_code` and `group_name`: treatment group assignment  
+- `mouse_id`: unique identifier per mouse  
+- `day`: time in days  
+- `volume_mm3`: tumor volume in cubic millimeters
+
+The dataset is filtered to include only the relevant treatment groups
+and sorted by group, mouse, and day.
 
 ``` r
 mouse_df <- readxl::read_excel(tumor_file, sheet = "Mouse_day_mean") %>%
@@ -92,6 +109,18 @@ knitr::kable(head(mouse_df, 8),
 Preview: tumor per mouse per day
 
 ## Tumor: data quality check
+
+For each mouse, a set of quality metrics is calculated:
+
+- Number of measurements (`n_points`)  
+- First and last measurement day (`min_day`, `max_day`)  
+- First and last tumor volume (`first_vol`, `last_vol`)  
+- Minimum and maximum tumor volume (`min_vol`, `max_vol`)
+
+A mouse is flagged with `recommend_exclude` if it has fewer than four
+measurement points or if any recorded tumor volume is zero or
+negative.  
+This identifies animals with potentially unreliable data.
 
 ``` r
 min_points_required  <- 4
@@ -166,6 +195,11 @@ Simplified tumor QC table per mouse
 
 ## Tumor growth per mouse
 
+Tumor growth is visualized for each mouse individually.  
+Within each treatment group, a separate plot is generated.  
+This allows assessment of variability within groups and identification
+of outlier growth patterns that might not be visible in group averages.
+
 ``` r
 # Plot function for each treatment group separately
 plot_group_mice <- function(df_group, title_text) {
@@ -198,6 +232,13 @@ for (g in levels(mouse_df$group_name)) {
 ![](tumor_bodyweight_QC_numbered_files/figure-gfm/tumor-individuals-1.png)<!-- -->![](tumor_bodyweight_QC_numbered_files/figure-gfm/tumor-individuals-2.png)<!-- -->![](tumor_bodyweight_QC_numbered_files/figure-gfm/tumor-individuals-3.png)<!-- -->![](tumor_bodyweight_QC_numbered_files/figure-gfm/tumor-individuals-4.png)<!-- -->
 
 ## Exclude mice with \< 30 days
+
+Mice with less than 30 days of observation are excluded from downstream
+analyses.  
+This ensures that group comparisons are not biased by unequal follow-up
+durations.  
+The table shows for each mouse the measurement duration and whether it
+is excluded.
 
 ``` r
 min_duration_days <- 30
@@ -270,7 +311,19 @@ knitr::kable(
 
 Mice with duration \< 30 days are excluded
 
-## Tumor group mean ± SD (Per day, no binning, filtered mice)
+## Tumor group mean ± SD
+
+The average tumor growth per treatment group is visualized in two ways:
+
+1.  **Unbinned (per day):** trends are shown at each individual
+    measurement day.  
+2.  **Binned:** days are grouped into three-day intervals (while keeping
+    day 0 separate).  
+    This reduces variability while maintaining the overall growth
+    pattern.
+
+The plots display mean tumor volume with standard deviation for each
+group.
 
 ``` r
 tumor_daily <- mouse_df_filtered %>%
@@ -366,7 +419,10 @@ ggplot(tumor_binned, aes(x = bin_day, y = mean_volume_mm3,
 
 # Bodyweight analysis
 
-## Bodyweight per mouse
+Bodyweight analysis serves as an indicator of potential treatment
+toxicity.  
+All mice are included in this analysis (even those excluded in tumor
+analysis) to avoid bias from selective removal.
 
 # Bodyweight analysis (unfiltered mice)
 
@@ -411,6 +467,10 @@ Preview: bodyweight per mouse per day
 
 ## Bodyweight per mouse
 
+Bodyweight development is shown for each mouse individually.  
+Separate plots per treatment group allow for detailed inspection of
+stability or loss of weight over time.
+
 ``` r
 plot_bw_group <- function(df_group, title_text) {
   ggplot(df_group, aes(x = day, y = bodyweight_g,
@@ -441,7 +501,11 @@ for (g in levels(bw_mouse$group_name)) {
 
 ![](tumor_bodyweight_QC_numbered_files/figure-gfm/bw-plot-1.png)<!-- -->![](tumor_bodyweight_QC_numbered_files/figure-gfm/bw-plot-2.png)<!-- -->![](tumor_bodyweight_QC_numbered_files/figure-gfm/bw-plot-3.png)<!-- -->![](tumor_bodyweight_QC_numbered_files/figure-gfm/bw-plot-4.png)<!-- -->
 
-## Bodyweight group mean ± SD (per day, unfiltered)
+## Bodyweight group mean ± SD
+
+The average bodyweight per treatment group is calculated for each day.  
+Mean values and standard deviations are shown, which enables direct
+comparison across treatment groups.
 
 ``` r
 bw_daily <- bw_mouse %>%
@@ -479,7 +543,20 @@ ggplot(bw_daily, aes(x = day, y = mean_bw,
 
 ![](tumor_bodyweight_QC_numbered_files/figure-gfm/bw-SD-1.png)<!-- -->
 
-## Bodyweight waterfall: maximale % verlies per muis
+## Bodyweight waterfall: maximum % loss per mouse
+
+For each mouse, the baseline bodyweight (day 0 or the first available
+measurement) is identified.  
+The percentage change relative to baseline is calculated for all
+timepoints.  
+The minimum percentage (greatest loss) is extracted per mouse.
+
+A waterfall plot is then generated:
+
+- Each bar represents a single mouse  
+- Bars are sorted from most to least weight loss within groups  
+- A dashed line indicates 10% bodyweight loss, a common threshold for
+  toxicity concerns
 
 ``` r
 # Bereken baseline per muis (dag 0 indien aanwezig, anders eerste meting)
@@ -598,7 +675,27 @@ knitr::kable(nadir,
 
 Nadir % bodyweight change per mouse
 
-## Tumor: AUC per mouse + ANOVA/T-tests
+# Tumor: AUC per mouse + ANOVA/T-tests
+
+Tumor burden over time is summarized using the **area under the curve
+(AUC)**, calculated with the trapezoidal rule up to each mouse’s last
+measurement day.  
+This provides a single value reflecting both growth rate and observation
+duration.
+
+The following statistical tests are applied:
+
+- **ANOVA:** determines whether mean AUC differs between treatment
+  groups  
+- **Pairwise t-tests (Holm correction):** compares each pair of groups
+  while correcting for multiple comparisons  
+- **Tukey HSD post-hoc test:** another method to test all pairwise
+  differences after ANOVA  
+- **Targeted comparison:** particular attention is given to the
+  difference between *Tamoxifen* and *Tamoxifen + Dexamethasone*
+
+Results are presented in tables as well as boxplots showing group-level
+distributions with individual mouse data points and annotated p-values.
 
 ``` r
 library(pracma)   # voor trapz()
