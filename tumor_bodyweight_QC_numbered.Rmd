@@ -518,7 +518,7 @@ auc_summary <- auc_per_mouse %>%
 knitr::kable(
   auc_summary,
   digits = 1,
-  caption = "Summary of AUC per treatment group (mean ± SD, n mice)"
+  caption = "Summary of AUC per teatment group (mean ± SD, n mice)"
 )
 
 # 7) Print resultaten in de console
