@@ -1,171 +1,183 @@
-# Tumor & Bodyweight Analysis with QC and Filtering
+11636 Tumor & Bodyweight Analysis
 
-This repository documents a complete workflow for analyzing tumor growth and bodyweight in mice treated with different compounds.  
-The analysis is performed in **R Markdown**, combining code, results, and interpretation into a reproducible report.
+Author: Filip Noijons
+Date: r format(Sys.Date())
 
----
+This repository contains the full workflow and results for study 11636, investigating tumor growth and bodyweight changes in mice treated with:
 
-## 1. Introduction
+Control
 
-Preclinical experiments often follow tumor growth and bodyweight over time in different treatment groups.  
-To ensure robust and interpretable results, raw data needs to be:
+Tamoxifen
 
-- Loaded and mapped into tidy formats,  
-- Checked for quality (minimum number of measurements, unrealistic values, etc.),  
-- Filtered according to QC criteria,  
-- Summarized at both the **mouse level** and the **group level**,  
-- Visualized with growth curves and error bars,  
-- Analyzed statistically (ANOVA, t-tests, etc.).
+Dexamethasone
 
-This workflow automates all of those steps.
+Tamoxifen + Dexamethasone
 
----
+The workflow is scripted in RMarkdown, ensuring full reproducibility. This README narrates every step of the analysis, with tables and figures embedded.
 
-## 2. Data Sources
+⚙️ Setup
 
-Two Excel files are used:
+Data loaded from Excel sheets (tumor_mouse_and_group_means.xlsx, bodyweight_mouse_and_group_means.xlsx)
 
-- **Tumor volume data** (`*_tumor_mouse_and_group_means.xlsx`)
-- **Bodyweight data** (`*_bodyweight_mouse_and_group_means.xlsx`)
+Helper functions for binning days and group mapping
 
-Both contain daily mean values per mouse.
+Color palette for consistent plotting
 
-Treatment groups are mapped as:
+📊 Tumor Analysis
+1. Data loading
 
-- Control  
-- Tamoxifen  
-- Dexamethasone  
-- Tamoxifen + Dexamethasone  
+Tumor volumes per mouse per day were imported.
 
-Colors are consistently applied in all plots.
+Preview (first 8 rows):
 
----
+<Preview: tumor per mouse per day>
 
-## 3. Tumor Analysis
+2. Quality control
 
-### 3.1 Loading Data
-Tumor volume data is loaded from the `Mouse_day_mean` sheet and reshaped into a long format with:
+Each mouse was checked for:
 
-- `group_name` (treatment group)  
-- `mouse_id` (unique mouse identifier)  
-- `day` (time point)  
-- `volume_mm3` (tumor volume in mm³)
+Number of measurement points
 
-A preview of the first rows:
+Minimum/maximum tumor size
 
-*(table: Preview tumor per mouse per day — generated in the HTML report)*
+Exclusion recommendation
 
----
+QC table:
 
-### 3.2 Quality Check (QC)
-Each mouse is checked for:
+<Simplified tumor QC table per mouse>
 
-- Number of recorded time points (`n_points`)  
-- Minimum and maximum day recorded  
-- First, last, min, and max tumor volumes  
-- Whether the mouse should be **excluded** (fewer than 4 points or min volume ≤ 0)
+3. Individual tumor growth
 
-QC summary per mouse:
+Each treatment group’s mice plotted separately:
 
-*(table: Simplified tumor QC table — included in HTML report)*
+Control
 
----
 
-### 3.3 Individual Growth Curves
-Tumor growth per mouse, grouped by treatment:
+Tamoxifen
 
-![Tumor growth per mouse](tumor_bodyweight_QC_numbered_files/figure-html/tumor-individuals-1.png)
 
----
+Dexamethasone
 
-### 3.4 Filtering by Duration
-Mice with <30 days of follow-up are excluded.
 
-*(table: Duration per mouse, with “excluded = TRUE” for short follow-up)*
+Tamoxifen + Dexamethasone
 
----
 
-### 3.5 Group Means ± SD
+4. Exclusion of short follow-up
 
-#### Per day (no binning):
-![Tumor mean ± SD daily](tumor_bodyweight_QC_numbered_files/figure-html/tumor-mean-unbinned-1.png)
+Mice with <30 days of follow-up were excluded.
 
-#### Binned (3-day bins, day 0 kept separate):
-![Tumor mean ± SD binned](tumor_bodyweight_QC_numbered_files/figure-html/tumor-mean-binned-1.png)
+Duration per mouse (excluded flagged):
 
----
+<Mice with duration <30 days are excluded>
 
-## 4. Bodyweight Analysis
+5. Group mean tumor growth
 
-### 4.1 Loading Data
-Bodyweight data is read from the same Excel workbook, selecting the correct column (`mean_bodyweight_g` or `bodyweight_g`).
+Unbinned (daily means ± SD):
 
-Preview:
 
-*(table: Preview bodyweight per mouse per day — generated in HTML report)*
+Binned (3-day bins, day 0 separate):
 
----
 
-### 4.2 Individual Bodyweight Curves
-![Bodyweight per mouse](tumor_bodyweight_QC_numbered_files/figure-html/bw-plot-1.png)
+6. Tumor burden (AUC)
 
----
+AUC calculated using trapezoidal rule per mouse.
 
-### 4.3 Group Means ± SD
-Mean ± SD bodyweight per group over time:
+Preview (first 8 rows):
 
-![Bodyweight mean ± SD](tumor_bodyweight_QC_numbered_files/figure-html/bw-SD-1.png)
+<Preview: AUC per mouse>
 
----
 
-### 4.4 Maximum % Loss (Waterfall)
-For each mouse:
+Tukey HSD post-hoc test:
 
-- Baseline = day 0 (if available) or first measurement,  
-- % change calculated relative to baseline,  
-- Minimum % retained across time = nadir.
+<Tukey post-hoc test for pairwise group comparisons (AUC)>
 
-Plotted as a waterfall:
 
-![Bodyweight waterfall](tumor_bodyweight_QC_numbered_files/figure-html/bw-waterfall-1.png)
+Summary (mean ± SD per group):
 
-Dashed line marks a −10% threshold.
+<Summary of AUC per teatment group (mean ± SD, n mice)>
 
----
 
-## 5. Tumor Burden (AUC) + Statistics
+Boxplot with statistical comparisons:
 
-### 5.1 Area Under the Curve (AUC)
-For each mouse:
 
-- Tumor volume vs. day curve integrated (trapezoidal rule).  
-- Produces per-mouse tumor burden.
+⚖️ Bodyweight Analysis
+1. Data loading
 
-*(table: Preview AUC per mouse — in HTML report)*
+Bodyweight data per mouse per day.
 
----
+Preview (first 8 rows):
 
-### 5.2 Statistical Testing
-- **ANOVA**: tests for overall group differences  
-- **Pairwise t-tests** (Holm correction): compare treatment pairs  
-- **Tukey HSD**: post-hoc analysis
+<Preview: bodyweight per mouse per day>
 
-*(tables: Tukey post-hoc results and summary of AUC per group — included in HTML report)*
+2. Individual bodyweight trajectories
 
----
+Control
 
-### 5.3 Visualization
-Boxplots of AUC per treatment group with p-values:
 
-![Tumor AUC per group](tumor_bodyweight_QC_numbered_files/figure-html/tumor-auc-1.png)
+Tamoxifen
 
----
 
-## 6. Reproducibility
+Dexamethasone
 
-### Running the Analysis
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/<your-username>/<your-repo>.git
+Tamoxifen + Dexamethasone
 
+
+3. Group mean bodyweight
+
+Mean ± SD per day.
+
+4. Maximal % bodyweight loss (waterfall)
+
+For each mouse, maximal loss relative to baseline was calculated.
+
+Nadir table:
+
+<Nadir % bodyweight change per mouse>
+
+
+Waterfall plot:
+
+
+🧪 Statistical Analyses
+
+ANOVA for AUC across all groups
+
+Pairwise t-tests with Holm correction
+
+Tukey HSD post-hoc test
+
+All outputs are tabulated above.
+
+📂 Repository Structure
+├── 11636_Data_analysis.Rmd   # RMarkdown workflow
+├── README.md                 # This summary
+├── figures/                  # Saved plots
+│   ├── tumor_growth_control.png
+│   ├── tumor_growth_tamoxifen.png
+│   ├── tumor_growth_dexamethasone.png
+│   ├── tumor_growth_combo.png
+│   ├── tumor_mean_unbinned.png
+│   ├── tumor_mean_binned.png
+│   ├── tumor_auc_boxplot.png
+│   ├── bodyweight_control.png
+│   ├── bodyweight_tamoxifen.png
+│   ├── bodyweight_dexamethasone.png
+│   ├── bodyweight_combo.png
+│   ├── bodyweight_mean.png
+│   └── bodyweight_waterfall.png
+└── data/                     # Original Excel files
+
+✅ Key Outcomes
+
+QC flagged mice with insufficient data or short follow-up.
+
+Group-wise differences observed in tumor growth patterns.
+
+Bodyweight analysis revealed treatment-related changes.
+
+Tumor burden (AUC) compared across groups with statistical tests.
+
+This workflow ensures analysis is transparent, reproducible, and fully documented.
+
+📌 When you knit your .Rmd with github_document, all the <...> placeholders will be replaced by the actual markdown tables.
