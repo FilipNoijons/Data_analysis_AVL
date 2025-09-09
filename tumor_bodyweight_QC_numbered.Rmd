@@ -1,6 +1,6 @@
 ---
-title: "Tumor & Bodyweight Analysis with QC and Filtering"
-author: "Auto-generated Rmd"
+title: "11636_Data analysis"
+author: "Filip Noijons"
 date: "`r format(Sys.Date())`"
 output:
   html_document:
@@ -95,7 +95,10 @@ mouse_df <- readxl::read_excel(tumor_file, sheet = "Mouse_day_mean") %>%
   dplyr::filter(group_code %in% names(group_name_map)) %>%
   dplyr::arrange(group_name, mouse_id, day)
 
-knitr::kable(head(mouse_df, 8), caption="Preview: tumor per mouse per day")
+knitr::kable(head(mouse_df, 8),
+             caption="Preview: tumor per mouse per day",
+             format="markdown")
+
 
 ```
 
@@ -121,10 +124,10 @@ tum_qc <- mouse_df %>%
   ) %>%
   arrange(group_code, mouse_id)
 
-knitr::kable(
-  tum_qc,
-  caption = "Simplified tumor QC table per mouse"
-)
+knitr::kable(tum_qc,
+             caption = "Simplified tumor QC table per mouse",
+             format="markdown")
+
 ```
 
 
@@ -302,7 +305,10 @@ bw_mouse <- bw_raw %>%
   filter(group_code %in% names(group_name_map)) %>%
   arrange(group_name, mouse_id, day)
 
-knitr::kable(head(bw_mouse, 8), caption="Preview: bodyweight per mouse per day")
+knitr::kable(head(bw_mouse, 8),
+             caption="Preview: bodyweight per mouse per day",
+             format="markdown")
+
 ```
 
 ## Bodyweight per mouse
@@ -436,7 +442,9 @@ ggplot(wf, aes(x = x, y = min_pct, fill = group_name)) +
     panel.grid.major.y = element_line(color = "grey90", linewidth = 0.25),
     panel.grid.minor.y = element_blank()
   )
-
+knitr::kable(nadir,
+             caption="Nadir % bodyweight change per mouse",
+             format="markdown")
 ```
 
 ## Tumor: AUC per mouse + ANOVA/T-tests
