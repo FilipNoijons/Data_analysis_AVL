@@ -20,6 +20,8 @@ Filip Noijons
   - [Bodyweight group mean ± SEM](#bodyweight-group-mean--sem)
   - [Bodyweight change before and after treatment
     break](#bodyweight-change-before-and-after-treatment-break)
+  - [Statistical comparison: Before vs
+    After](#statistical-comparison-before-vs-after)
 
 # Setup
 
@@ -467,3 +469,162 @@ ggplot(bw_summary, aes(x = period, y = mean_change, fill = group_name)) +
 ```
 
 ![](README_files/figure-gfm/bw-barplot-1.png)<!-- -->
+
+## Statistical comparison: Before vs After
+
+To formally test whether bodyweight significantly increased after the
+treatment break compared to before, we performed within-mouse paired
+comparisons. For each mouse, the mean percentage bodyweight change
+(relative to baseline) was calculated separately for the periods before
+day 28 and after day 36. These paired values were then compared within
+each treatment group using:
+
+Paired t-test: assumes approximately normally distributed differences.
+
+Wilcoxon signed-rank test: a non-parametric alternative that does not
+assume normality.
+
+The resulting table reports the mean difference (After−Before, %),
+number of mice, and p-values from both tests.
+
+``` r
+# --- Statistical comparison of bodyweight change before vs after treatment break ---
+
+# Calculate % change from baseline per mouse
+baseline_bw <- bw_mouse %>%
+  group_by(mouse_id) %>%
+  summarise(baseline = first(bodyweight_g), .groups = "drop")
+
+bw_pct <- bw_mouse %>%
+  left_join(baseline_bw, by = "mouse_id") %>%
+  mutate(pct_change = 100 * (bodyweight_g - baseline) / baseline)
+
+# Restrict to mice with both before (day <28) and after (day ≥36)
+valid_mice <- bw_pct %>%
+  group_by(mouse_id) %>%
+  summarise(
+    has_before = any(day < 28, na.rm = TRUE),
+    has_after  = any(day >= 36, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(has_before & has_after) %>%
+  pull(mouse_id)
+
+bw_pct_complete <- bw_pct %>%
+  filter(mouse_id %in% valid_mice)
+
+# Summarize per mouse: mean before vs after
+bw_mouse_summary <- bw_pct_complete %>%
+  mutate(period = case_when(
+    day < 28 ~ "Before",
+    day >= 36 ~ "After",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(period)) %>%
+  group_by(group_name, mouse_id, period) %>%
+  summarise(mean_change = mean(pct_change, na.rm = TRUE), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = period, values_from = mean_change)
+
+# Stats per group: paired t-test + Wilcoxon
+stats_table <- bw_mouse_summary %>%
+  group_by(group_name) %>%
+  summarise(
+    N        = n(),
+    mean_diff = mean(After - Before, na.rm = TRUE),
+    ttest_p   = t.test(After, Before, paired = TRUE)$p.value,
+    wilcox_p  = wilcox.test(After, Before, paired = TRUE)$p.value,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    mean_diff = round(mean_diff, 2),
+    ttest_p   = ifelse(ttest_p < 0.0001, "<0.0001",
+                       formatC(ttest_p, format = "f", digits = 4)),
+    wilcox_p  = ifelse(wilcox_p < 0.0001, "<0.0001",
+                       formatC(wilcox_p, format = "f", digits = 4))
+  )
+
+# Show as markdown table
+knitr::kable(
+  stats_table,
+  col.names = c("Treatment", "N", "Mean Δ (After−Before, %)", 
+                "Paired t-test p", "Wilcoxon p"),
+  align = "lcccc",
+  caption = "Statistical comparison of bodyweight change before vs after treatment break"
+)
+```
+
+| Treatment | N | Mean Δ (After−Before, %) | Paired t-test p | Wilcoxon p |
+|:---|:--:|:--:|:--:|:--:|
+| Control | 8 | 8.67 | \<0.0001 | 0.0078 |
+| Tamoxifen | 8 | 8.10 | \<0.0001 | 0.0078 |
+| Dexamethasone | 10 | 7.10 | \<0.0001 | 0.0020 |
+| Tamoxifen + Dexamethasone | 7 | 6.34 | 0.0002 | 0.0156 |
+
+Statistical comparison of bodyweight change before vs after treatment
+break
+
+``` r
+library(lme4)
+```
+
+    ## Loading required package: Matrix
+
+``` r
+library(lmerTest)
+```
+
+    ## 
+    ## Attaching package: 'lmerTest'
+
+    ## The following object is masked from 'package:lme4':
+    ## 
+    ##     lmer
+
+    ## The following object is masked from 'package:stats':
+    ## 
+    ##     step
+
+``` r
+library(emmeans)
+```
+
+    ## Welcome to emmeans.
+    ## Caution: You lose important information if you filter this package's results.
+    ## See '? untidy'
+
+``` r
+library(dplyr)
+library(knitr)
+
+# Fit mixed-effects model
+lmm <- lmer(volume_mm3 ~ group_name * day + (1 | mouse_id), data = mouse_df_filtered)
+
+# Estimated marginal means (group comparisons per day)
+emm <- emmeans(lmm, ~ group_name | day)
+
+# Tukey-adjusted pairwise comparisons
+pairwise_results <- contrast(emm, method = "pairwise", adjust = "tukey") %>%
+  as.data.frame()
+
+sig_tam_combo <- pairwise_results %>%
+  filter(grepl("Tamoxifen", contrast) & grepl("Tamoxifen \\+ Dexamethasone", contrast)) %>%
+  filter(p.value < 0.05)
+
+kable(sig_tam_combo,
+      caption = "Significant LMM Tukey-adjusted differences between Tamoxifen and Tamoxifen + Dexamethasone, per day",
+      format = "markdown")
+```
+
+| contrast | day | estimate | SE | df | t.ratio | p.value |
+|:---|---:|---:|---:|---:|---:|---:|
+| Control - (Tamoxifen + Dexamethasone) | 29.30159 | 92.99226 | 9.167953 | 60.99555 | 10.143187 | 0 |
+| Dexamethasone - (Tamoxifen + Dexamethasone) | 29.30159 | 82.95278 | 8.825756 | 61.05157 | 9.398943 | 0 |
+
+Significant LMM Tukey-adjusted differences between Tamoxifen and
+Tamoxifen + Dexamethasone, per day
+
+``` r
+write.csv(pairwise_results,
+          file = file.path(outdir, "LMM_all_group_comparisons.csv"),
+          row.names = FALSE)
+```
