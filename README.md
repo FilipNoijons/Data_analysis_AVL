@@ -1,7 +1,7 @@
 11636_Data analysis
 ================
 Filip Noijons
-2025-09-18
+2025-09-19
 
 - [Setup](#setup)
 - [Tumor analysis](#tumor-analysis)
@@ -564,27 +564,15 @@ Statistical comparison of bodyweight change before vs after treatment
 break
 
 ``` r
-library(lme4)
+install.packages("emmeans")
 ```
 
-    ## Loading required package: Matrix
+    ## Installing package into '/home/filip.noijons/R/x86_64-pc-linux-gnu-library/4.1'
+    ## (as 'lib' is unspecified)
 
 ``` r
-library(lmerTest)
-```
-
-    ## 
-    ## Attaching package: 'lmerTest'
-
-    ## The following object is masked from 'package:lme4':
-    ## 
-    ##     lmer
-
-    ## The following object is masked from 'package:stats':
-    ## 
-    ##     step
-
-``` r
+# Load libraries
+library(dplyr)
 library(emmeans)
 ```
 
@@ -593,38 +581,120 @@ library(emmeans)
     ## See '? untidy'
 
 ``` r
-library(dplyr)
 library(knitr)
 
-# Fit mixed-effects model
-lmm <- lmer(volume_mm3 ~ group_name * day + (1 | mouse_id), data = mouse_df_filtered)
+# Filter dataset for the two groups of interest
+df_sub <- mouse_df_filtered %>%
+  filter(group_name %in% c("Tamoxifen", "Tamoxifen + Dexamethasone"))
 
-# Estimated marginal means (group comparisons per day)
-emm <- emmeans(lmm, ~ group_name | day)
+results <- list()
 
-# Tukey-adjusted pairwise comparisons
-pairwise_results <- contrast(emm, method = "pairwise", adjust = "tukey") %>%
-  as.data.frame()
+# Loop over real day numbers
+for (d in sort(unique(df_sub$day))) {
+  sub <- df_sub %>% filter(day == d)
+  
+  if (n_distinct(sub$group_name) == 2) {
+    fit <- lm(volume_mm3 ~ group_name, data = sub)
+    emm <- emmeans(fit, ~ group_name)
+    tukey <- pairs(emm, adjust = "tukey") %>% as.data.frame()
+    
+    row <- tukey %>%
+      filter(grepl("Tamoxifen", contrast) & grepl("Dexamethasone", contrast)) %>%
+      mutate(day = d,  # <-- keep the *real* numeric day
+             mean_diff = estimate,
+             p_adj = p.value,
+             reject = p.value < 0.05) %>%
+      select(day, mean_diff, p_adj, reject)
+    
+    results[[length(results) + 1]] <- row
+  }
+}
 
-sig_tam_combo <- pairwise_results %>%
-  filter(grepl("Tamoxifen", contrast) & grepl("Tamoxifen \\+ Dexamethasone", contrast)) %>%
-  filter(p.value < 0.05)
+# Final results with *true day values*
+results_df <- bind_rows(results) %>% arrange(day)
 
-kable(sig_tam_combo,
-      caption = "Significant LMM Tukey-adjusted differences between Tamoxifen and Tamoxifen + Dexamethasone, per day",
-      format = "markdown")
+knitr::kable(results_df, digits = 4,
+             caption = "Tamoxifen vs Tamoxifen + Dexamethasone per day (Tukey-adjusted)")
 ```
 
-| contrast | day | estimate | SE | df | t.ratio | p.value |
-|:---|---:|---:|---:|---:|---:|---:|
-| Control - (Tamoxifen + Dexamethasone) | 29.30159 | 92.99226 | 9.167953 | 60.99555 | 10.143187 | 0 |
-| Dexamethasone - (Tamoxifen + Dexamethasone) | 29.30159 | 82.95278 | 8.825756 | 61.05157 | 9.398943 | 0 |
+| day | mean_diff |  p_adj | reject |
+|----:|----------:|-------:|:-------|
+|   0 |    6.2747 | 0.2644 | FALSE  |
+|   2 |   10.5000 | 0.0236 | TRUE   |
+|   4 |    7.4286 | 0.3329 | FALSE  |
+|   7 |   20.2143 | 0.0268 | TRUE   |
+|   9 |    1.6667 | 0.8412 | FALSE  |
+|  11 |   22.1339 | 0.0016 | TRUE   |
+|  14 |   17.9286 | 0.0396 | TRUE   |
+|  16 |   15.0625 | 0.0295 | TRUE   |
+|  18 |   11.4375 | 0.0377 | TRUE   |
+|  21 |    5.7768 | 0.2143 | FALSE  |
+|  23 |    9.6571 | 0.0322 | TRUE   |
+|  25 |   11.8714 | 0.0280 | TRUE   |
+|  28 |    6.6964 | 0.0513 | FALSE  |
+|  30 |   16.6429 | 0.0032 | TRUE   |
+|  32 |    6.6429 | 0.2476 | FALSE  |
+|  35 |    7.0268 | 0.2036 | FALSE  |
+|  37 |    7.0714 | 0.2660 | FALSE  |
+|  39 |   16.1875 | 0.0062 | TRUE   |
+|  42 |   14.1786 | 0.0173 | TRUE   |
+|  44 |   16.9286 | 0.0027 | TRUE   |
+|  46 |   19.0714 | 0.0025 | TRUE   |
+|  49 |   23.7500 | 0.0223 | TRUE   |
+|  51 |    6.7500 | 0.5209 | FALSE  |
+|  53 |   25.3375 | 0.0249 | TRUE   |
+|  56 |   15.5571 | 0.0693 | FALSE  |
+|  58 |   23.9451 | 0.0090 | TRUE   |
+|  60 |   24.6667 | 0.0013 | TRUE   |
 
-Significant LMM Tukey-adjusted differences between Tamoxifen and
-Tamoxifen + Dexamethasone, per day
+Tamoxifen vs Tamoxifen + Dexamethasone per day (Tukey-adjusted)
 
 ``` r
-write.csv(pairwise_results,
-          file = file.path(outdir, "LMM_all_group_comparisons.csv"),
-          row.names = FALSE)
+library(dplyr)
+library(emmeans)
+library(knitr)
+
+# Filter dataset for the two groups of interest
+df_sub <- mouse_df_filtered %>%
+  filter(group_name %in% c("Tamoxifen", "Tamoxifen + Dexamethasone"))
+
+results <- list()
+
+# Loop over all measurement days
+for (d in sort(unique(df_sub$day))) {
+  sub <- df_sub %>% filter(day == d)
+  
+  if (n_distinct(sub$group_name) == 2) {
+    # Fit linear model for that day
+    fit <- lm(volume_mm3 ~ group_name, data = sub)
+    emm <- emmeans(fit, ~ group_name)
+    tukey <- pairs(emm, adjust = "tukey") %>% as.data.frame()
+    
+    # Extract Tamoxifen vs Tamoxifen+Dexa
+    row <- tukey %>%
+      filter(grepl("Tamoxifen", contrast) & grepl("Dexamethasone", contrast)) %>%
+      mutate(day = d,
+             mean_diff = estimate,
+             p_adj = p.value,
+             reject = p.value < 0.05) %>%
+      select(day, mean_diff, p_adj,)
+    
+    results[[length(results) + 1]] <- row
+  }
+}
+
+# Collect results
+results_df <- bind_rows(results) %>% arrange(day)
+
+# Show only Day 60
+day60_result <- results_df %>% filter(day == 60)
+
+kable(day60_result, digits = 4,
+      caption = "Tamoxifen vs Tamoxifen + Dexamethasone at Day 60 (Tukey-adjusted)")
 ```
+
+| day | mean_diff |  p_adj |
+|----:|----------:|-------:|
+|  60 |   24.6667 | 0.0013 |
+
+Tamoxifen vs Tamoxifen + Dexamethasone at Day 60 (Tukey-adjusted)

@@ -492,8 +492,14 @@ knitr::kable(
   caption = "Statistical comparison of bodyweight change before vs after treatment break"
 )
 ```
-```{r}
+```{r,Test}
 
+install.packages("emmeans")
+
+# Load libraries
+library(dplyr)
+library(emmeans)
+library(knitr)
 
 # Filter dataset for the two groups of interest
 df_sub <- mouse_df_filtered %>%
@@ -533,7 +539,7 @@ knitr::kable(results_df, digits = 4,
 
 
 
-```{r}
+```{r, test2}
 library(dplyr)
 library(emmeans)
 library(knitr)
